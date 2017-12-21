@@ -182,6 +182,7 @@ class ZMailQCmd(ZMailQ):
     ACTION_DELETE = "delete"
     ACTION_REQUEUE = "requeue"
     ACTION_HOLD = "hold"
+    ACTION_COUNT = "count"
 
     action = None
     is_verbose = False
@@ -200,6 +201,7 @@ class ZMailQCmd(ZMailQ):
             self.ACTION_DELETE,
             self.ACTION_REQUEUE,
             self.ACTION_HOLD,
+            self.ACTION_COUNT,
         ]
 
     def print_v(self, msg):
@@ -212,6 +214,7 @@ class ZMailQCmd(ZMailQ):
             return
         print(msg)
 
+    __countq = 0
     def exec_action(self, queue):
         """
         Execute action
@@ -237,6 +240,9 @@ class ZMailQCmd(ZMailQ):
             self.print_v("Running: %s"%(hold_cmd,))
             self.exec_cmd(hold_cmd, True)
 
+        elif self.action == self.ACTION_COUNT:
+            self.__countq += 1
+
         else:
             pprint(queue)
 
@@ -244,6 +250,9 @@ class ZMailQCmd(ZMailQ):
         parsed = self.process()
         for data in self.filter(parsed):
             self.exec_action(data)
+
+        if self.action == self.ACTION_COUNT:
+            print("Total queue: %d"%(self.__countq))
 
 
 if __name__ == "__main__":
@@ -255,7 +264,6 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Zimbra MTA (Postfix) queue manager")
     parser.add_argument("-b", "--base", default=None, help="Base path to find postfix queue binary file")
     parser.add_argument("--mailq-data", default=None, help="Use this file\"s contents instead of calling mailq")
-    parser.add_argument("--count", "-c", action="store_true", help="Return only the count of matching items")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbosely show all executed command")
     parser.add_argument("--action", "-a", default=None, help="Action that will be applied")
 
