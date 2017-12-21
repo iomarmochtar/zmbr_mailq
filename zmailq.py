@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 
+__author__ = ('Imam Omar Mochtar', ('iomarmochtar@gmail.com',))
+
+"""
+Manage and parsing postfix's mail queue made easy
+"""
+
 import re
 import datetime
 import os
@@ -57,7 +63,7 @@ class ZMailQ(object):
             if not is_found:
                 raise ZMailQ_Err("Cannot find a valid path for commands: %s" % (",".join(self.cmds),))
 
-    def exec_cmd(self, cmd):
+    def exec_cmd(self, cmd, ignore_stderr=False):
         """
         Execute shell command
         :param cmd:
@@ -66,7 +72,7 @@ class ZMailQ(object):
         output, error = subprocess.Popen(
             cmd, universal_newlines=True, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-        if error:
+        if error and not ignore_stderr:
             raise ZMailQ_Err("Error while executing command %s:%s" % (cmd, error))
         return output.splitlines()
 
@@ -146,10 +152,10 @@ class ZMailQ(object):
             if "sender" in ptrn and not re.search(ptrn["sender"], x["sender"]):
                 continue
 
-            if "only_active" in ptrn and not ptrn["active"]:
+            if "only_active" in ptrn and not x["is_active"]:
                 continue
 
-            if "exclude_active" in ptrn and ptrn["active"]:
+            if "exclude_active" in ptrn and x["is_active"]:
                 continue
 
             if "recipient" in ptrn or "reason" in ptrn:
@@ -182,9 +188,8 @@ class ZMailQCmd(ZMailQ):
 
     def __init__(self, action=None, verbose=False, *args, **kwargs):
 
-        if action and action not in self.get_all_actions():
-            raise ZMailQ_Err("Unknown action: "%(action,))
-
+        # for ordinary postfix installation
+        self._base_defaults.append("/usr/sbin")
         self.action = action
         self.is_verbose = verbose
         ZMailQ.__init__(self, *args, **kwargs)
@@ -218,19 +223,19 @@ class ZMailQCmd(ZMailQ):
             del_cmd = "%s -p %s"%(self.cmds["postsuper"], qid)
             print("Deleting queue: %s"%(qid,))
             self.print_v("Running: %s"%(del_cmd,))
-            self.exec_cmd(del_cmd)
+            self.exec_cmd(del_cmd, True)
 
         elif self.action == self.ACTION_REQUEUE:
             rq_cmd = "%s -r %s"%(self.cmds["postsuper"], qid)
             print("requeue: %s"%(qid,))
             self.print_v("Running: %s"%(rq_cmd,))
-            self.exec_cmd(rq_cmd)
+            self.exec_cmd(rq_cmd, True)
 
         elif self.action == self.ACTION_HOLD:
             hold_cmd = "%s -H %s"%(self.cmds["postsuper"], qid)
             print("hold: %s"%(qid,))
             self.print_v("Running: %s"%(hold_cmd,))
-            self.exec_cmd(hold_cmd)
+            self.exec_cmd(hold_cmd, True)
 
         else:
             pprint(queue)
@@ -270,7 +275,9 @@ if __name__ == "__main__":
     search_ptrn = {}
 
     if args.action and args.action not in ZMailQCmd.get_all_actions():
-        err_exit("Unknown action %s"%(args.action,))
+        err_exit(("Unknown action %s, available options are %s"%(
+                args.action, ", ".join(ZMailQCmd.get_all_actions()))
+              ))
 
     search_args = ["reason", "recipient", "sender", "qid", "exclude_active", "only_active"]
     for sa in search_args:
