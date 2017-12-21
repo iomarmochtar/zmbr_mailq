@@ -15,10 +15,7 @@ class ZMailQ_Err(Exception):
 
 class ZMailQ(object):
 
-    ACTION_DELETE = "delete"
-    ACTION_REQUEUE = "requeue"
-
-    __base_defaults = [
+    _base_defaults = [
         "/opt/zimbra/postfix/sbin",
         "/opt/zimbra/common/sbin"
     ]
@@ -29,17 +26,18 @@ class ZMailQ(object):
     }
     date_format = "%a %b %d %H:%M:%S"
 
-    def __init__(self, base_path=None, queue_data=None, action=None, search_ptrn={}):
+    def __init__(self, base_path=None, queue_data=None, search_ptrn={}):
         self.search_ptrn = search_ptrn
+
         if queue_data:
             if not os.path.isfile(queue_data):
-                raise ZMailQ_Err("Queue data (%s) doesn't exists"%(queue_data,))
+                raise ZMailQ_Err("Queue data (%s) doesn't exists" % (queue_data,))
             self.queue_data = queue_data
 
         if not self.queue_data and base_path:
             if not os.path.isdir(base_path):
-                raise ZMailQ_Err("Folder %s doesn't exist" %(base_path,))
-            self.__base_defaults.insert(0 , base_path)
+                raise ZMailQ_Err("Folder %s doesn't exist" % (base_path,))
+            self._base_defaults.insert(0, base_path)
 
         # check for base path
         if not self.queue_data:
@@ -47,31 +45,43 @@ class ZMailQ(object):
             if os.getuid() != 0:
                 raise ZMailQ_Err("You must ran this as root")
             is_found = False
-            for md in self.__base_defaults:
+            for md in self._base_defaults:
                 if not os.path.isdir(md):
                     continue
                 for cmd in self.cmds:
                     full_path = os.path.join(md, cmd)
                     if not os.path.isfile(full_path):
-                        raise ZMailQ_Err("%s not found"%(full_path,))
+                        raise ZMailQ_Err("%s not found" % (full_path,))
                     self.cmds[cmd] = full_path
                     is_found = True
             if not is_found:
                 raise ZMailQ_Err("Cannot find a valid path for commands: %s" % (",".join(self.cmds),))
 
+    def exec_cmd(self, cmd):
+        """
+        Execute shell command
+        :param cmd:
+        :return:
+        """
+        output, error = subprocess.Popen(
+            cmd, universal_newlines=True, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        if error:
+            raise ZMailQ_Err("Error while executing command %s:%s" % (cmd, error))
+        return output.splitlines()
+
     @property
     def lines(self):
+        """
+        Get queue data by give it's source data
+        :return:
+        """
         if self.queue_data:
             with open(self.queue_data, 'r') as f:
                 return f.readlines()
         else:
-            cmd = '%s -p'%(self.cmds['postqueue'],)
-            output, error = subprocess.Popen(
-                cmd, universal_newlines=True, shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-            if error:
-                raise ZMailQ_Err("Error while executing command %s:%s"%(cmd, error))
-            return output.splitlines()
+            showq_cmd = '%s -p' % (self.cmds['postqueue'],)
+            return self.exec_cmd(showq_cmd)
 
     def process(self):
         re_qid = re.compile(
@@ -114,9 +124,9 @@ class ZMailQ(object):
                 if rec_last == 0:
                     ret[last_qid]["recipients"].append((None, []))
 
-                ret[last_qid]["recipients"][rec_last-1][1].append(line.lower())
+                ret[last_qid]["recipients"][rec_last - 1][1].append(line.lower())
             else:
-                raise ZMailQ_Err("Cannot parse this line: %s"%(line,))
+                raise ZMailQ_Err("Cannot parse this line: %s" % (line,))
 
         return ret
 
@@ -138,7 +148,7 @@ class ZMailQ(object):
 
             if "only_active" in ptrn and not ptrn["active"]:
                 continue
-                
+
             if "exclude_active" in ptrn and ptrn["active"]:
                 continue
 
@@ -158,10 +168,77 @@ class ZMailQ(object):
                     continue
             yield x
 
+
+class ZMailQCmd(ZMailQ):
+    """
+    For executing zmailq directly from command line with additional actions
+    """
+    ACTION_DELETE = "delete"
+    ACTION_REQUEUE = "requeue"
+    ACTION_HOLD = "hold"
+
+    action = None
+    is_verbose = False
+
+    def __init__(self, action=None, verbose=False, *args, **kwargs):
+
+        if action and action not in self.get_all_actions():
+            raise ZMailQ_Err("Unknown action: "%(action,))
+
+        self.action = action
+        self.is_verbose = verbose
+        ZMailQ.__init__(self, *args, **kwargs)
+
+    @classmethod
+    def get_all_actions(self):
+        return [
+            self.ACTION_DELETE,
+            self.ACTION_REQUEUE,
+            self.ACTION_HOLD,
+        ]
+
+    def print_v(self, msg):
+        """
+        print to stdout if it's in verbose
+        :param msg:
+        :return:
+        """
+        if not self.is_verbose:
+            return
+        print(msg)
+
+    def exec_action(self, queue):
+        """
+        Execute action
+        :param queue: queue data that will be processed
+        :return:
+        """
+        qid = queue["qid"]
+        if self.action == self.ACTION_DELETE:
+            del_cmd = "%s -p %s"%(self.cmds["postsuper"], qid)
+            print("Deleting queue: %s"%(qid,))
+            self.print_v("Running: %s"%(del_cmd,))
+            self.exec_cmd(del_cmd)
+
+        elif self.action == self.ACTION_REQUEUE:
+            rq_cmd = "%s -r %s"%(self.cmds["postsuper"], qid)
+            print("requeue: %s"%(qid,))
+            self.print_v("Running: %s"%(rq_cmd,))
+            self.exec_cmd(rq_cmd)
+
+        elif self.action == self.ACTION_HOLD:
+            hold_cmd = "%s -H %s"%(self.cmds["postsuper"], qid)
+            print("hold: %s"%(qid,))
+            self.print_v("Running: %s"%(hold_cmd,))
+            self.exec_cmd(hold_cmd)
+
+        else:
+            pprint(queue)
+
     def main(self):
         parsed = self.process()
         for data in self.filter(parsed):
-            pprint(data)
+            self.exec_action(data)
 
 
 if __name__ == "__main__":
@@ -174,6 +251,8 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--base", default=None, help="Base path to find postfix queue binary file")
     parser.add_argument("--mailq-data", default=None, help="Use this file\"s contents instead of calling mailq")
     parser.add_argument("--count", "-c", action="store_true", help="Return only the count of matching items")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbosely show all executed command")
+    parser.add_argument("--action", "-a", default=None, help="Action that will be applied")
 
     ## SEARCH
     search = parser.add_argument_group("search", "Search patterns")
@@ -185,19 +264,13 @@ if __name__ == "__main__":
     search.add_argument("--only-active", action="store_true", help="Only include items in the queue that are active")
     search.add_argument("--size", "-sz", default=None, help="Only include items in the queue that are active")
 
-    ## ACTIONS
-    action = parser.add_argument_group("action", "Action for matched queue mail")
-    action.add_argument("--delete", "-d", action="store_true", help="Delete from queue")
-    action.add_argument("--requeue", "-rq", action="store_true", help="Set to active queue")
-
     args = parser.parse_args()
 
-    # print(args)
     base_path = None
     search_ptrn = {}
 
-    if args.delete and args.requeue:
-        err_exit("You can only choose wether delete or requeue for action argument !!!")
+    if args.action and args.action not in ZMailQCmd.get_all_actions():
+        err_exit("Unknown action %s"%(args.action,))
 
     search_args = ["reason", "recipient", "sender", "qid", "exclude_active", "only_active"]
     for sa in search_args:
@@ -206,8 +279,10 @@ if __name__ == "__main__":
             continue
         search_ptrn[sa] = x
 
-    ZMailQ(
+    ZMailQCmd(
         base_path=args.base,
         queue_data=args.mailq_data,
-        search_ptrn=search_ptrn
+        search_ptrn=search_ptrn,
+        action=args.action,
+        verbose=args.verbose
     ).main()
