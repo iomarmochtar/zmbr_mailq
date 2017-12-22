@@ -31,6 +31,7 @@ FEATURES
 - Requeue
 - Hold
 - Queue counting (can be combined by filtering)
+- Show mail queue message
 
 USING
 =====

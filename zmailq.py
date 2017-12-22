@@ -28,7 +28,8 @@ class ZMailQ(object):
     queue_data = None
     cmds = {
         "postqueue": None,
-        "postsuper": None
+        "postsuper": None,
+        "postcat": None
     }
     date_format = "%a %b %d %H:%M:%S"
 
@@ -72,7 +73,8 @@ class ZMailQ(object):
         output, error = subprocess.Popen(
             cmd, universal_newlines=True, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-        if error and not ignore_stderr:
+        # if the error just a warning then ignore it
+        if error and not ignore_stderr and not error.startswith("postqueue: warning"):
             raise ZMailQ_Err("Error while executing command %s:%s" % (cmd, error))
         return output.splitlines()
 
@@ -91,7 +93,7 @@ class ZMailQ(object):
 
     def process(self):
         re_qid = re.compile(
-            r'^(?P<qid>[A-Z|\d|\*]+)\s+(?P<size>(\d+))\s+(?P<datetime>\w+\s\w+\s\d+\s+\d{2}:\d{2}:\d{2})\s+(?P<sender>.*?)$'
+            r'^(?P<qid>[A-Z|\d|\*]+)\s+(?P<size>(\d+))\s+(?P<datetime>\w+\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+(?P<sender>.*?)$'
         )
         re_ignore_line = re.compile(r'^[\-Queue ID\-|\-\-]')
         re_cln = re.compile(r'(^\(|\)$)')
@@ -183,6 +185,7 @@ class ZMailQCmd(ZMailQ):
     ACTION_REQUEUE = "requeue"
     ACTION_HOLD = "hold"
     ACTION_COUNT = "count"
+    ACTION_SHOW = "show"
 
     action = None
     is_verbose = False
@@ -202,6 +205,7 @@ class ZMailQCmd(ZMailQ):
             self.ACTION_REQUEUE,
             self.ACTION_HOLD,
             self.ACTION_COUNT,
+            self.ACTION_SHOW,
         ]
 
     def print_v(self, msg):
@@ -239,6 +243,11 @@ class ZMailQCmd(ZMailQ):
             print("hold: %s"%(qid,))
             self.print_v("Running: %s"%(hold_cmd,))
             self.exec_cmd(hold_cmd, True)
+
+        elif self.action == self.ACTION_SHOW:
+            show_cmd = "%s -q %s" % (self.cmds["postcat"], qid)
+            self.print_v("Running: %s" % (show_cmd,))
+            print("\n".join(self.exec_cmd(show_cmd, True)))
 
         elif self.action == self.ACTION_COUNT:
             self.__countq += 1
